@@ -1,0 +1,35 @@
+# LLM 모델 설정
+# API 키는 환경 변수로 관리: OPENAI_API_KEY, ANTHROPIC_API_KEY 등
+
+models:
+
+  gpt-5-nano:
+    provider: openai
+    model: gpt-5-nano
+    temperature: 0.7
+    max_tokens: 2000
+
+  gpt-5-mini:
+    provider: openai
+    model: gpt-5-mini
+    temperature: 0.7
+    max_tokens: 2000
+
+  gpt-4.1-mini:
+    provider: openai
+    model: gpt-4.1-mini
+    temperature: 0.7
+    max_tokens: 2000
+
+  gpt-4o-mini:
+    provider: openai
+    model: gpt-4o-mini
+    temperature: 0.7
+    max_tokens: 2000
+
+  kimi-k2-thinking:
+    provider: openrouter
+    model: moonshotai/kimi-k2-thinking
+    temperature: 0.7
+    max_tokens: 2000
+    base_url: https://openrouter.ai/api/v1

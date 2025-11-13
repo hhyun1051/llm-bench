@@ -1,0 +1,14 @@
+# LangChain
+langchain>=0.3.0
+langchain-core>=0.3.0
+
+# LLM Provider 패키지
+langchain-openai>=0.2.0
+langchain-anthropic>=0.2.0
+langchain-google-genai>=2.0.0
+
+# 설정 파일 처리
+pyyaml>=6.0
+
+# 환경 변수 관리
+python-dotenv>=1.0.0
