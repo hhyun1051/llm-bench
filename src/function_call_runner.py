@@ -28,7 +28,8 @@ class FunctionCallRunner:
         model_name: str,
         prompt: str,
         tools: List[Callable],
-        expected_tool_calls: List[Dict] = None
+        expected_tool_calls: List[Dict] = None,
+        system_prompt: str = None
     ) -> Dict[str, Any]:
         """
         Agent로 펑션 콜링 실행
@@ -38,6 +39,7 @@ class FunctionCallRunner:
             prompt: 실행할 프롬프트
             tools: 사용 가능한 tool 함수 리스트
             expected_tool_calls: 예상되는 tool 호출 정보 (평가용)
+            system_prompt: 시스템 프롬프트 (None이면 기본값 사용)
 
         Returns:
             {
@@ -52,6 +54,10 @@ class FunctionCallRunner:
 
         model_config = self.config['models'][model_name]
 
+        # 시스템 프롬프트 결정
+        if system_prompt is None:
+            system_prompt = DEFAULT_SYSTEM_PROMPT
+
         # 모델 초기화
         try:
             # 공통 유틸리티로 모델 생성
@@ -61,7 +67,7 @@ class FunctionCallRunner:
             agent = create_agent(
                 model=model,
                 tools=tools,
-                system_prompt=DEFAULT_SYSTEM_PROMPT
+                system_prompt=system_prompt
             )
 
         except Exception as e:
