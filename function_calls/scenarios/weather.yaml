@@ -1,0 +1,9 @@
+name: weather
+description: 날씨 정보 조회 테스트
+prompt: "서울의 현재 날씨를 알려주세요"
+tools:
+  - get_weather
+expected_tool_calls:
+  - tool: get_weather
+    expected_args:
+      city: "서울"

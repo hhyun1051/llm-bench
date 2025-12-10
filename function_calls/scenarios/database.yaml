@@ -1,0 +1,10 @@
+name: database
+description: 데이터베이스 검색 테스트
+prompt: "products 테이블에서 'laptop'을 검색해주세요"
+tools:
+  - search_database
+expected_tool_calls:
+  - tool: search_database
+    expected_args:
+      query: "laptop"
+      table: "products"

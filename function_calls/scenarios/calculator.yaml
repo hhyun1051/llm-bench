@@ -1,0 +1,11 @@
+name: calculator
+description: 계산기 함수 테스트
+prompt: "123에 456을 곱하면 얼마인가요?"
+tools:
+  - calculate
+expected_tool_calls:
+  - tool: calculate
+    expected_args:
+      operation: "multiply"
+      a: 123
+      b: 456

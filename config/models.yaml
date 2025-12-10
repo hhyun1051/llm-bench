@@ -3,9 +3,9 @@
 
 models:
 
-  gpt-5-nano:
+  gpt-5-nano-2025-08-07:
     provider: openai
-    model: gpt-5-nano
+    model: gpt-5-nano-2025-08-07
     temperature: 0.7
     max_tokens: 2000
 

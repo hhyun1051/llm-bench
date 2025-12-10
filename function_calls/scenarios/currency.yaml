@@ -1,0 +1,12 @@
+name: currency
+description: 환율 변환 테스트
+prompt: "100 달러를 원화로 환전하면 얼마인가요?"
+tools:
+  - convert_currency
+  - calculate
+expected_tool_calls:
+  - tool: convert_currency
+    expected_args:
+      amount: 100
+      from_currency: "USD"
+      to_currency: "KRW"
