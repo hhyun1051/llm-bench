@@ -10,12 +10,14 @@ from langchain_openai import ChatOpenAI
 class FunctionCallRunner:
     """Agent 기반 펑션 콜링을 실행하는 클래스"""
 
-    def __init__(self, config: Dict[str, Any]):
+    def __init__(self, config: Dict[str, Any], langfuse_integration=None):
         """
         Args:
             config: 모델 설정 딕셔너리
+            langfuse_integration: LangfuseIntegration 인스턴스 (선택)
         """
         self.config = config
+        self.langfuse = langfuse_integration
 
     def run_scenario(
         self,

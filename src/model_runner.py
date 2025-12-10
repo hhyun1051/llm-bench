@@ -11,13 +11,15 @@ import yaml
 class ModelRunner:
     """LLM 모델을 실행하는 클래스"""
 
-    def __init__(self, config_path: str = "config/models.yaml"):
+    def __init__(self, config_path: str = "config/models.yaml", langfuse_integration=None):
         """
         Args:
             config_path: 모델 설정 파일 경로
+            langfuse_integration: LangfuseIntegration 인스턴스 (선택)
         """
         with open(config_path, 'r', encoding='utf-8') as f:
             self.config = yaml.safe_load(f)
+        self.langfuse = langfuse_integration
 
     def run_prompt(self, model_name: str, prompt: str) -> Dict[str, Any]:
         """

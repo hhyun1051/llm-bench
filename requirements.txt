@@ -12,3 +12,6 @@ pyyaml>=6.0
 
 # 환경 변수 관리
 python-dotenv>=1.0.0
+
+# Observability & Tracing
+langfuse>=2.0.0
