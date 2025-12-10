@@ -1,24 +1,26 @@
 """모델 실행 모듈"""
-import os
 import time
-from typing import Dict, Any, Optional
-from langchain.chat_models import init_chat_model
+from typing import Dict, Any, Optional, Union
 from langchain_core.messages import HumanMessage
-from langchain_openai import ChatOpenAI
-import yaml
+
+from src.model_utils import create_model
+from src.config_validator import load_and_validate_config
 
 
 class ModelRunner:
     """LLM 모델을 실행하는 클래스"""
 
-    def __init__(self, config_path: str = "config/models.yaml", langfuse_integration=None):
+    def __init__(self, config: Union[str, Dict[str, Any]] = "config/models.yaml", langfuse_integration=None):
         """
         Args:
-            config_path: 모델 설정 파일 경로
+            config: 모델 설정 (파일 경로 또는 설정 딕셔너리)
             langfuse_integration: LangfuseIntegration 인스턴스 (선택)
         """
-        with open(config_path, 'r', encoding='utf-8') as f:
-            self.config = yaml.safe_load(f)
+        # config가 문자열이면 파일 경로로 간주하여 로드
+        if isinstance(config, str):
+            self.config = load_and_validate_config(config)
+        else:
+            self.config = config
         self.langfuse = langfuse_integration
 
     def run_prompt(self, model_name: str, prompt: str) -> Dict[str, Any]:
@@ -45,23 +47,8 @@ class ModelRunner:
 
         model_config = self.config['models'][model_name]
 
-        # OpenRouter는 별도 처리 (OpenAI 호환 API 사용)
-        if model_config['provider'] == 'openrouter':
-            model = ChatOpenAI(
-                model=model_config['model'],
-                temperature=model_config.get('temperature', 0.7),
-                max_tokens=model_config.get('max_tokens', 2000),
-                base_url=model_config.get('base_url', 'https://openrouter.ai/api/v1'),
-                api_key=os.getenv('OPENROUTER_API_KEY')
-            )
-        else:
-            # init_chat_model로 모델 초기화
-            model = init_chat_model(
-                model=model_config['model'],
-                model_provider=model_config['provider'],
-                temperature=model_config.get('temperature', 0.7),
-                max_tokens=model_config.get('max_tokens', 2000)
-            )
+        # 공통 유틸리티로 모델 생성
+        model = create_model(model_config)
 
         # 실행 시간 측정
         start_time = time.time()

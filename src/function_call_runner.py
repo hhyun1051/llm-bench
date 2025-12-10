@@ -1,10 +1,14 @@
 """펑션 콜링 실행 모듈"""
-import os
 import time
 from typing import Dict, Any, List, Callable
 from langchain.agents import create_agent
-from langchain.chat_models import init_chat_model
-from langchain_openai import ChatOpenAI
+
+from src.model_utils import create_model
+from src.constants import (
+    DEFAULT_SYSTEM_PROMPT,
+    WEIGHT_CORRECT_TOOL,
+    WEIGHT_CORRECT_ARGS
+)
 
 
 class FunctionCallRunner:
@@ -50,28 +54,14 @@ class FunctionCallRunner:
 
         # 모델 초기화
         try:
-            # OpenRouter는 별도 처리
-            if model_config['provider'] == 'openrouter':
-                model = ChatOpenAI(
-                    model=model_config['model'],
-                    temperature=model_config.get('temperature', 0.7),
-                    max_tokens=model_config.get('max_tokens', 2000),
-                    base_url=model_config.get('base_url', 'https://openrouter.ai/api/v1'),
-                    api_key=os.getenv('OPENROUTER_API_KEY')
-                )
-            else:
-                model = init_chat_model(
-                    model=model_config['model'],
-                    model_provider=model_config['provider'],
-                    temperature=model_config.get('temperature', 0.7),
-                    max_tokens=model_config.get('max_tokens', 2000)
-                )
+            # 공통 유틸리티로 모델 생성
+            model = create_model(model_config)
 
             # Agent 생성
             agent = create_agent(
                 model=model,
                 tools=tools,
-                system_prompt="You are a helpful assistant that uses tools when needed."
+                system_prompt=DEFAULT_SYSTEM_PROMPT
             )
 
         except Exception as e:
@@ -220,7 +210,7 @@ class FunctionCallRunner:
         expected_tool = expected.get('tool')
         if actual['name'] == expected_tool:
             evaluation['correct_tool'] = True
-            evaluation['score'] += 0.5
+            evaluation['score'] += WEIGHT_CORRECT_TOOL
             evaluation['details']['tool_name'] = f"✓ Correct: {actual['name']}"
         else:
             evaluation['details']['tool_name'] = f"✗ Expected: {expected_tool}, Got: {actual['name']}"
@@ -245,14 +235,14 @@ class FunctionCallRunner:
 
             if len(matched_args) == len(expected_args):
                 evaluation['correct_args'] = True
-                evaluation['score'] += 0.5
+                evaluation['score'] += WEIGHT_CORRECT_ARGS
                 evaluation['details']['args'] = f"✓ All args correct: {', '.join(matched_args)}"
             else:
                 evaluation['details']['args'] = f"✗ Args mismatch: {', '.join(mismatched_args)}"
         else:
             # 예상 args가 없으면 자동으로 정답 처리
             evaluation['correct_args'] = True
-            evaluation['score'] += 0.5
+            evaluation['score'] += WEIGHT_CORRECT_ARGS
             evaluation['details']['args'] = "✓ No specific args expected"
 
         # 평가 메시지

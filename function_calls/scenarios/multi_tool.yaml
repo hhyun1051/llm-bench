@@ -1,6 +1,6 @@
 name: multi_tool
 description: 여러 툴 중 적절한 툴 선택 테스트
-prompt: "뉴욕의 날씨를 화씨로 알려주세요"
+prompt: "뉴욕의 날씨를 화씨로 알려주세요. 참고로 함수 인자는 한글로만 입력하세요."
 tools:
   - get_weather
   - calculate
@@ -8,5 +8,5 @@ tools:
 expected_tool_calls:
   - tool: get_weather
     expected_args:
-      city: "new york"
-      unit: "fahrenheit"
+      city: "뉴욕"
+      unit: "화씨"

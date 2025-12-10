@@ -1,0 +1,46 @@
+"""상수 정의"""
+
+# 기본 설정값
+DEFAULT_TEMPERATURE = 0.7
+DEFAULT_MAX_TOKENS = 2000
+DEFAULT_SYSTEM_PROMPT = "You are a helpful assistant that uses tools when needed."
+
+# OpenRouter 설정
+OPENROUTER_DEFAULT_BASE_URL = "https://openrouter.ai/api/v1"
+
+# 환경 변수 키
+ENV_OPENAI_API_KEY = "OPENAI_API_KEY"
+ENV_ANTHROPIC_API_KEY = "ANTHROPIC_API_KEY"
+ENV_GOOGLE_API_KEY = "GOOGLE_API_KEY"
+ENV_OPENROUTER_API_KEY = "OPENROUTER_API_KEY"
+ENV_LANGFUSE_PUBLIC_KEY = "LANGFUSE_PUBLIC_KEY"
+ENV_LANGFUSE_SECRET_KEY = "LANGFUSE_SECRET_KEY"
+ENV_LANGFUSE_HOST = "LANGFUSE_HOST"
+
+# Langfuse 설정
+LANGFUSE_DEFAULT_HOST = "https://cloud.langfuse.com"
+
+# 파일 경로
+DEFAULT_CONFIG_PATH = "config/models.yaml"
+DEFAULT_PROMPTS_DIR = "prompts"
+DEFAULT_SCENARIOS_DIR = "function_calls/scenarios"
+DEFAULT_RESULTS_DIR = "results"
+
+# Provider 이름
+PROVIDER_OPENAI = "openai"
+PROVIDER_ANTHROPIC = "anthropic"
+PROVIDER_GOOGLE = "google-genai"
+PROVIDER_OPENROUTER = "openrouter"
+
+# 출력 형식
+SEPARATOR_LONG = "=" * 60
+SEPARATOR_SHORT = "-" * 60
+
+# 평가 점수
+SCORE_PERFECT = 1.0
+SCORE_PARTIAL = 0.5
+SCORE_FAIL = 0.0
+
+# 평가 가중치
+WEIGHT_CORRECT_TOOL = 0.5
+WEIGHT_CORRECT_ARGS = 0.5

@@ -3,6 +3,14 @@ import os
 from typing import Dict, Any, Optional
 from datetime import datetime
 
+from src.logger import get_logger
+from src.constants import (
+    ENV_LANGFUSE_PUBLIC_KEY,
+    ENV_LANGFUSE_SECRET_KEY,
+    ENV_LANGFUSE_HOST,
+    LANGFUSE_DEFAULT_HOST
+)
+
 
 class LangfuseIntegration:
     """Langfuse 추적 및 분석 통합 클래스"""
@@ -12,6 +20,7 @@ class LangfuseIntegration:
         Args:
             enabled: Langfuse 사용 여부
         """
+        self.logger = get_logger(__name__)
         self.enabled = enabled and self._check_credentials()
         self.langfuse = None
 
@@ -19,19 +28,19 @@ class LangfuseIntegration:
             try:
                 from langfuse import Langfuse
                 self.langfuse = Langfuse(
-                    public_key=os.getenv("LANGFUSE_PUBLIC_KEY"),
-                    secret_key=os.getenv("LANGFUSE_SECRET_KEY"),
-                    host=os.getenv("LANGFUSE_HOST", "https://cloud.langfuse.com")
+                    public_key=os.getenv(ENV_LANGFUSE_PUBLIC_KEY),
+                    secret_key=os.getenv(ENV_LANGFUSE_SECRET_KEY),
+                    host=os.getenv(ENV_LANGFUSE_HOST, LANGFUSE_DEFAULT_HOST)
                 )
-                print("✓ Langfuse 연결 성공")
+                self.logger.info("Langfuse 연결 성공")
             except Exception as e:
-                print(f"⚠ Langfuse 초기화 실패: {e}")
+                self.logger.warning(f"Langfuse 초기화 실패: {e}")
                 self.enabled = False
 
     def _check_credentials(self) -> bool:
         """Langfuse 자격증명 확인"""
-        public_key = os.getenv("LANGFUSE_PUBLIC_KEY")
-        secret_key = os.getenv("LANGFUSE_SECRET_KEY")
+        public_key = os.getenv(ENV_LANGFUSE_PUBLIC_KEY)
+        secret_key = os.getenv(ENV_LANGFUSE_SECRET_KEY)
 
         if not public_key or not secret_key:
             return False
@@ -65,7 +74,7 @@ class LangfuseIntegration:
             # 여기서는 trace_id만 생성하고 반환
             return trace_id
         except Exception as e:
-            print(f"⚠ Trace 생성 실패: {e}")
+            self.logger.warning(f"Trace 생성 실패: {e}")
             return None
 
     def log_query_result(
@@ -134,7 +143,7 @@ class LangfuseIntegration:
                 )
 
         except Exception as e:
-            print(f"⚠ Query 결과 로깅 실패: {e}")
+            self.logger.warning(f"Query 결과 로깅 실패: {e}")
 
     def log_function_call_result(
         self,
@@ -214,7 +223,7 @@ class LangfuseIntegration:
                 )
 
         except Exception as e:
-            print(f"⚠ Function call 결과 로깅 실패: {e}")
+            self.logger.warning(f"Function call 결과 로깅 실패: {e}")
 
     def create_session(self, session_name: str) -> Optional[str]:
         """
@@ -234,7 +243,7 @@ class LangfuseIntegration:
             # session_name을 반환
             return session_name
         except Exception as e:
-            print(f"⚠ Session 생성 실패: {e}")
+            self.logger.warning(f"Session 생성 실패: {e}")
             return None
 
     def flush(self):
@@ -243,12 +252,12 @@ class LangfuseIntegration:
             try:
                 self.langfuse.flush()
             except Exception as e:
-                print(f"⚠ Flush 실패: {e}")
+                self.logger.warning(f"Flush 실패: {e}")
 
     def get_dashboard_url(self) -> Optional[str]:
         """Langfuse 대시보드 URL 반환"""
         if not self.enabled:
             return None
 
-        host = os.getenv("LANGFUSE_HOST", "https://cloud.langfuse.com")
+        host = os.getenv(ENV_LANGFUSE_HOST, LANGFUSE_DEFAULT_HOST)
         return f"{host}/project"

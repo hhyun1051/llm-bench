@@ -1,4 +1,4 @@
-"""LLM 벤치마크 메인 스크립트"""
+"""LLM 벤치마크 메인 스크립트 (리팩토링 버전)"""
 import argparse
 from datetime import datetime
 from pathlib import Path
@@ -16,9 +16,18 @@ from src.model_runner import ModelRunner
 from src.function_call_loader import FunctionCallLoader
 from src.function_call_runner import FunctionCallRunner
 from src.langfuse_integration import LangfuseIntegration
+from src.benchmark_runner import BenchmarkRunner
+from src.config_validator import load_and_validate_config, ConfigValidationError
+from src.logger import setup_logger
+from src.constants import (
+    DEFAULT_CONFIG_PATH,
+    DEFAULT_PROMPTS_DIR,
+    SEPARATOR_LONG
+)
 
 
-def main():
+def parse_arguments() -> argparse.Namespace:
+    """커맨드 라인 인자 파싱"""
     parser = argparse.ArgumentParser(description="LLM 벤치마크 도구")
     parser.add_argument(
         "--models",
@@ -43,14 +52,14 @@ def main():
     parser.add_argument(
         "--config",
         type=str,
-        default="config/models.yaml",
-        help="모델 설정 파일 경로 (기본: config/models.yaml)"
+        default=DEFAULT_CONFIG_PATH,
+        help=f"모델 설정 파일 경로 (기본: {DEFAULT_CONFIG_PATH})"
     )
     parser.add_argument(
         "--prompts-dir",
         type=str,
-        default="prompts",
-        help="프롬프트 디렉토리 경로 (기본: prompts)"
+        default=DEFAULT_PROMPTS_DIR,
+        help=f"프롬프트 디렉토리 경로 (기본: {DEFAULT_PROMPTS_DIR})"
     )
     parser.add_argument(
         "--type",
@@ -69,78 +78,90 @@ def main():
         action="store_true",
         help="사용 가능한 펑션 콜링 시나리오 목록 출력"
     )
-    parser.add_argument(
-        "--enable-langfuse",
-        action="store_true",
-        help="Langfuse 추적 활성화 (환경변수에 LANGFUSE_PUBLIC_KEY, LANGFUSE_SECRET_KEY 필요)"
-    )
 
-    args = parser.parse_args()
+    return parser.parse_args()
 
-    # 초기화
+
+def initialize_components(args: argparse.Namespace):
+    """컴포넌트 초기화"""
+    # 설정 파일 검증 및 로드
     try:
-        import yaml
-        with open(args.config, 'r', encoding='utf-8') as f:
-            config = yaml.safe_load(f)
+        config = load_and_validate_config(args.config)
+    except (ConfigValidationError, FileNotFoundError) as e:
+        raise ValueError(f"설정 파일 오류: {e}")
 
-        # Langfuse 초기화
-        langfuse = LangfuseIntegration(enabled=args.enable_langfuse)
+    # Langfuse 초기화 (항상 활성화)
+    langfuse = LangfuseIntegration(enabled=True)
 
-        model_runner = ModelRunner(args.config, langfuse_integration=langfuse)
+    # 모델 러너 초기화 (이미 로드된 config 딕셔너리 전달)
+    model_runner = ModelRunner(config, langfuse_integration=langfuse)
 
-        # 타입에 따라 필요한 로더만 초기화
-        prompt_loader = None
-        function_loader = None
-        function_runner = None
+    # 타입에 따라 필요한 로더만 초기화
+    prompt_loader = None
+    function_loader = None
+    function_runner = None
 
-        if args.type in ["query", "all"]:
-            prompt_loader = PromptLoader(args.prompts_dir)
+    if args.type in ["query", "all"]:
+        prompt_loader = PromptLoader(args.prompts_dir)
 
-        if args.type in ["function-call", "all"]:
-            function_loader = FunctionCallLoader()
-            function_runner = FunctionCallRunner(config, langfuse_integration=langfuse)
+    if args.type in ["function-call", "all"]:
+        function_loader = FunctionCallLoader()
+        function_runner = FunctionCallRunner(config, langfuse_integration=langfuse)
 
-    except Exception as e:
-        print(f"초기화 오류: {e}")
-        return 1
+    return {
+        'config': config,
+        'langfuse': langfuse,
+        'model_runner': model_runner,
+        'prompt_loader': prompt_loader,
+        'function_loader': function_loader,
+        'function_runner': function_runner
+    }
 
-    # 목록 출력 옵션
+
+def handle_list_commands(args: argparse.Namespace, components: dict) -> bool:
+    """목록 출력 커맨드 처리. 처리했으면 True 반환"""
     if args.list_models:
         print("사용 가능한 모델:")
-        for model in model_runner.list_available_models():
-            info = model_runner.get_model_info(model)
+        for model in components['model_runner'].list_available_models():
+            info = components['model_runner'].get_model_info(model)
             print(f"  - {model} ({info['provider']}: {info['model']})")
-        return 0
+        return True
 
     if args.list_prompts:
-        if prompt_loader:
+        if components['prompt_loader']:
             print("사용 가능한 프롬프트:")
-            for prompt in prompt_loader.list_prompts():
+            for prompt in components['prompt_loader'].list_prompts():
                 print(f"  - {prompt}")
         else:
             print("프롬프트 로더가 초기화되지 않았습니다. --type query 또는 --type all로 실행하세요.")
-        return 0
+        return True
 
     if args.list_functions:
-        if function_loader:
+        if components['function_loader']:
             print("사용 가능한 펑션 콜링 시나리오:")
-            for scenario in function_loader.list_scenarios():
+            for scenario in components['function_loader'].list_scenarios():
                 print(f"  - {scenario}")
         else:
             print("펑션 콜링 로더가 초기화되지 않았습니다. --type function-call 또는 --type all로 실행하세요.")
-        return 0
+        return True
 
+    return False
+
+
+def determine_targets(args: argparse.Namespace, components: dict):
+    """실행할 모델, 프롬프트, 시나리오 결정"""
     # 실행할 모델 결정
     if args.models:
         models = [m.strip() for m in args.models.split(",")]
     else:
-        models = model_runner.list_available_models()
+        models = components['model_runner'].list_available_models()
 
     # 실행할 프롬프트/시나리오 결정
     prompts = {}
     scenarios = {}
 
     if args.type in ["query", "all"]:
+        prompt_loader = components['prompt_loader']
         if args.prompts:
             prompt_names = [p.strip() for p in args.prompts.split(",")]
             prompts = {name: prompt_loader.load_prompt(name) for name in prompt_names}
@@ -148,233 +169,85 @@ def main():
             prompts = prompt_loader.load_all_prompts()
 
     if args.type in ["function-call", "all"]:
+        function_loader = components['function_loader']
         if args.functions:
             scenario_names = [s.strip() for s in args.functions.split(",")]
             scenarios = {name: function_loader.load_scenario(name) for name in scenario_names}
         else:
             scenarios = function_loader.load_all_scenarios()
 
-    # 벤치마크 실행
-    print(f"\n{'='*60}")
-    print(f"LLM 벤치마크 시작")
-    print(f"{'='*60}")
+    return models, prompts, scenarios
+
+
+def print_benchmark_header(args: argparse.Namespace, models: list, prompts: dict, scenarios: dict):
+    """벤치마크 시작 헤더 출력"""
+    print(f"\n{SEPARATOR_LONG}")
+    print("LLM 벤치마크 시작")
+    print(f"{SEPARATOR_LONG}")
     print(f"타입: {args.type}")
     print(f"모델: {', '.join(models)}")
     if prompts:
         print(f"프롬프트: {', '.join(prompts.keys())}")
     if scenarios:
         print(f"펑션 콜링 시나리오: {', '.join(scenarios.keys())}")
-    print(f"{'='*60}\n")
+    print(f"{SEPARATOR_LONG}\n")
+
+
+def main():
+    """메인 함수"""
+    # 로거 설정
+    setup_logger()
+
+    args = parse_arguments()
+
+    # 초기화
+    try:
+        components = initialize_components(args)
+    except Exception as e:
+        print(f"초기화 오류: {e}")
+        return 1
+
+    # 목록 출력 옵션 처리
+    if handle_list_commands(args, components):
+        return 0
+
+    # 실행 대상 결정
+    models, prompts, scenarios = determine_targets(args, components)
+
+    # 헤더 출력
+    print_benchmark_header(args, models, prompts, scenarios)
 
     # Langfuse 세션 생성
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    langfuse = components['langfuse']
     session_id = langfuse.create_session(f"benchmark_{timestamp}") if langfuse.enabled else None
+
+    # 벤치마크 러너 생성
+    runner = BenchmarkRunner(
+        model_runner=components['model_runner'],
+        function_runner=components['function_runner'],
+        langfuse=langfuse
+    )
 
     # 일반 질의 벤치마크
     if prompts:
-        print(f"\n{'='*60}")
-        print("일반 질의 벤치마크")
-        print(f"{'='*60}")
-
-        for idx, (prompt_name, prompt_text) in enumerate(prompts.items(), 1):
-            print(f"\n[{idx}/{len(prompts)}] 프롬프트: {prompt_name}")
-            print(f"{'-'*60}")
-
-            benchmark_result = {
-                "prompt_name": prompt_name,
-                "prompt": prompt_text,
-                "results": []
-            }
-
-            # Langfuse trace 생성
-            trace_id = None
-            if langfuse.enabled:
-                trace_id = langfuse.create_trace(
-                    name=f"query_{prompt_name}",
-                    benchmark_type="query",
-                    metadata={"prompt_name": prompt_name, "session_id": session_id}
-                )
-
-            # 각 모델에 대해
-            for model_name in models:
-                print(f"  실행 중: {model_name}... ", end="", flush=True)
-
-                try:
-                    result = model_runner.run_prompt(model_name, prompt_text)
-
-                    if 'error' in result:
-                        print(f"❌ 오류: {result['error']}")
-                        benchmark_result["results"].append({
-                            "model": model_name,
-                            "error": result['error'],
-                            "metadata": result.get('metadata', {})
-                        })
-
-                        # Langfuse 로깅
-                        if trace_id:
-                            langfuse.log_query_result(
-                                trace_id=trace_id,
-                                model_name=model_name,
-                                prompt_name=prompt_name,
-                                prompt=prompt_text,
-                                response="",
-                                metadata=result.get('metadata', {}),
-                                error=result['error']
-                            )
-                    else:
-                        response_time = result['metadata'].get('response_time_ms', 0)
-                        tokens = result['metadata'].get('total_tokens', 'N/A')
-                        print(f"✓ 완료 ({response_time}ms, {tokens} tokens)")
-
-                        benchmark_result["results"].append({
-                            "model": model_name,
-                            "response": result['response'],
-                            "metadata": result['metadata']
-                        })
-
-                        # Langfuse 로깅
-                        if trace_id:
-                            langfuse.log_query_result(
-                                trace_id=trace_id,
-                                model_name=model_name,
-                                prompt_name=prompt_name,
-                                prompt=prompt_text,
-                                response=result['response'],
-                                metadata=result['metadata']
-                            )
-
-                except Exception as e:
-                    print(f"❌ 예외 발생: {e}")
-                    benchmark_result["results"].append({
-                        "model": model_name,
-                        "error": str(e),
-                        "metadata": {}
-                    })
+        runner.run_query_benchmarks(models, prompts, session_id)
 
     # 펑션 콜링 벤치마크
     if scenarios:
-        print(f"\n{'='*60}")
-        print("펑션 콜링 벤치마크")
-        print(f"{'='*60}")
+        runner.run_function_call_benchmarks(models, scenarios, session_id)
 
-        for idx, (scenario_name, scenario) in enumerate(scenarios.items(), 1):
-            print(f"\n[{idx}/{len(scenarios)}] 시나리오: {scenario_name}")
-            print(f"설명: {scenario['description']}")
-            print(f"프롬프트: {scenario['prompt']}")
-            print(f"{'-'*60}")
-
-            benchmark_result = {
-                "scenario_name": scenario_name,
-                "description": scenario['description'],
-                "prompt": scenario['prompt'],
-                "tools": scenario['tools'],
-                "expected_tool_calls": scenario.get('expected_tool_calls', []),
-                "results": []
-            }
-
-            # Langfuse trace 생성
-            trace_id = None
-            if langfuse.enabled:
-                trace_id = langfuse.create_trace(
-                    name=f"function_call_{scenario_name}",
-                    benchmark_type="function-call",
-                    metadata={
-                        "scenario_name": scenario_name,
-                        "tools": scenario['tools'],
-                        "session_id": session_id
-                    }
-                )
-
-            # 각 모델에 대해
-            for model_name in models:
-                print(f"  실행 중: {model_name}... ", end="", flush=True)
-
-                try:
-                    result = function_runner.run_scenario(
-                        model_name=model_name,
-                        prompt=scenario['prompt'],
-                        tools=scenario['tool_objects'],
-                        expected_tool_calls=scenario.get('expected_tool_calls')
-                    )
-
-                    if 'error' in result:
-                        print(f"❌ 오류: {result['error']}")
-                        benchmark_result["results"].append({
-                            "model": model_name,
-                            "error": result['error'],
-                            "metadata": result.get('metadata', {})
-                        })
-
-                        # Langfuse 로깅
-                        if trace_id:
-                            langfuse.log_function_call_result(
-                                trace_id=trace_id,
-                                model_name=model_name,
-                                scenario_name=scenario_name,
-                                prompt=scenario['prompt'],
-                                response="",
-                                tool_calls=[],
-                                evaluation={},
-                                metadata=result.get('metadata', {}),
-                                error=result['error']
-                            )
-                    else:
-                        response_time = result['metadata'].get('response_time_ms', 0)
-                        num_calls = result['metadata'].get('num_tool_calls', 0)
-                        evaluation = result.get('evaluation', {})
-                        score = evaluation.get('score', 0)
-
-                        status = "✓"
-                        if evaluation.get('evaluated'):
-                            if score == 1.0:
-                                status = "✓✓"
-                            elif score >= 0.5:
-                                status = "✓~"
-                            else:
-                                status = "✗"
-
-                        print(f"{status} 완료 ({response_time}ms, {num_calls} calls, score: {score:.1f})")
-
-                        benchmark_result["results"].append({
-                            "model": model_name,
-                            "response": result['response'],
-                            "tool_calls": result['tool_calls'],
-                            "metadata": result['metadata'],
-                            "evaluation": result['evaluation']
-                        })
-
-                        # Langfuse 로깅
-                        if trace_id:
-                            langfuse.log_function_call_result(
-                                trace_id=trace_id,
-                                model_name=model_name,
-                                scenario_name=scenario_name,
-                                prompt=scenario['prompt'],
-                                response=result['response'],
-                                tool_calls=result['tool_calls'],
-                                evaluation=result['evaluation'],
-                                metadata=result['metadata']
-                            )
-
-                except Exception as e:
-                    print(f"❌ 예외 발생: {e}")
-                    benchmark_result["results"].append({
-                        "model": model_name,
-                        "error": str(e),
-                        "metadata": {}
-                    })
-
-    # Langfuse 플러시 (모든 로그 전송)
+    # Langfuse 플러시
     if langfuse.enabled:
-        print(f"\n{'='*60}")
+        print(f"\n{SEPARATOR_LONG}")
         print("Langfuse로 데이터 전송 중...")
         langfuse.flush()
-        print(f"✓ Langfuse 전송 완료")
+        print("✓ Langfuse 전송 완료")
 
         dashboard_url = langfuse.get_dashboard_url()
         if dashboard_url:
             print(f"  대시보드: {dashboard_url}")
-        print(f"{'='*60}\n")
+        print(f"{SEPARATOR_LONG}\n")
 
     return 0
 
