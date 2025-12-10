@@ -67,11 +67,11 @@ class LangfuseIntegration:
             return None
 
         try:
-            # Langfuse SDK의 올바른 메서드 사용
+            # Trace ID 생성
             trace_id = self.langfuse.create_trace_id()
 
-            # Trace는 첫 번째 generation/event에서 자동 생성됨
-            # 여기서는 trace_id만 생성하고 반환
+            # 나중에 generation이 생성될 때 trace의 name과 metadata가 설정됨
+            # 여기서는 trace_id만 반환하고, 실제 name은 generation 생성 시 설정
             return trace_id
         except Exception as e:
             self.logger.warning(f"Trace 생성 실패: {e}")

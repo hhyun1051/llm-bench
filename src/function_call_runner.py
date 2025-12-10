@@ -90,14 +90,40 @@ class FunctionCallRunner:
             # 최종 응답 추출
             final_response = self._extract_final_response(result)
 
+            # 메타데이터 구성 (상세 정보 포함)
+            metadata = {
+                "response_time_ms": response_time_ms,
+                "num_tool_calls": len(tool_calls),
+                "num_messages": len(result.get('messages', []))
+            }
+
+            # 평가 상세 정보 추가
+            if evaluation.get('evaluated'):
+                metadata["tool_sequence"] = [tc.get('name') for tc in tool_calls]
+                metadata["expected_tool"] = expected_tool_calls[0].get('tool') if expected_tool_calls else None
+                metadata["actual_tool"] = tool_calls[0].get('name') if tool_calls else None
+
+                # 실패한 파라미터 정보
+                if not evaluation.get('correct_args', True):
+                    failed_args = {}
+                    expected_args = expected_tool_calls[0].get('expected_args', {})
+                    actual_args = tool_calls[0].get('args', {}) if tool_calls else {}
+
+                    for key, expected_value in expected_args.items():
+                        actual_value = actual_args.get(key)
+                        if str(actual_value).lower() != str(expected_value).lower():
+                            failed_args[key] = {
+                                "expected": expected_value,
+                                "actual": actual_value
+                            }
+
+                    if failed_args:
+                        metadata["failed_args"] = failed_args
+
             return {
                 "response": final_response,
                 "tool_calls": tool_calls,
-                "metadata": {
-                    "response_time_ms": response_time_ms,
-                    "num_tool_calls": len(tool_calls),
-                    "num_messages": len(result.get('messages', []))
-                },
+                "metadata": metadata,
                 "evaluation": evaluation
             }
 
@@ -233,11 +259,23 @@ class FunctionCallRunner:
                 else:
                     mismatched_args.append(f"{key}: missing (expected '{expected_value}')")
 
-            if len(matched_args) == len(expected_args):
+            # 부분 점수 계산
+            total_args = len(expected_args)
+            matched_count = len(matched_args)
+            arg_score = (matched_count / total_args) * WEIGHT_CORRECT_ARGS
+            evaluation['score'] += arg_score
+
+            if matched_count == total_args:
                 evaluation['correct_args'] = True
-                evaluation['score'] += WEIGHT_CORRECT_ARGS
                 evaluation['details']['args'] = f"✓ All args correct: {', '.join(matched_args)}"
+            elif matched_count > 0:
+                evaluation['correct_args'] = False
+                evaluation['details']['args'] = (
+                    f"⚠ Partial match ({matched_count}/{total_args}): "
+                    f"{', '.join(matched_args)} | Mismatched: {', '.join(mismatched_args)}"
+                )
             else:
+                evaluation['correct_args'] = False
                 evaluation['details']['args'] = f"✗ Args mismatch: {', '.join(mismatched_args)}"
         else:
             # 예상 args가 없으면 자동으로 정답 처리

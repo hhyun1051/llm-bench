@@ -260,7 +260,110 @@ class BenchmarkRunner:
 
             results.append(benchmark_result)
 
+        # 모델별 평균 점수 계산 및 Langfuse에 기록
+        # 약간의 지연을 주어 요약이 마지막에 표시되도록 함
+        import time
+        time.sleep(0.5)
+        self._log_model_summary_scores(results, models, session_id)
+
         return results
+
+    def _log_model_summary_scores(
+        self,
+        results: List[Dict[str, Any]],
+        models: List[str],
+        session_id: str = None
+    ):
+        """
+        모델별 평균 점수를 계산하고 Langfuse에 기록
+
+        Args:
+            results: 벤치마크 결과 리스트
+            models: 실행한 모델 목록
+            session_id: Langfuse 세션 ID
+        """
+        if not self.langfuse or not self.langfuse.enabled:
+            return
+
+        # 모델별 점수 집계
+        model_scores = {model: [] for model in models}
+        model_times = {model: [] for model in models}
+
+        for benchmark_result in results:
+            for result in benchmark_result.get("results", []):
+                model = result.get("model")
+                evaluation = result.get("evaluation", {})
+                metadata = result.get("metadata", {})
+
+                if evaluation.get("evaluated"):
+                    score = evaluation.get("score", 0)
+                    model_scores[model].append(score)
+
+                response_time = metadata.get("response_time_ms", 0)
+                if response_time > 0:
+                    model_times[model].append(response_time)
+
+        # 각 모델에 대한 요약 trace 생성 및 스코어 기록
+        for model in models:
+            scores = model_scores.get(model, [])
+            times = model_times.get(model, [])
+
+            if not scores:
+                continue
+
+            avg_score = sum(scores) / len(scores)
+            avg_time = sum(times) / len(times) if times else 0
+
+            # 모델 요약 trace 생성
+            summary_trace_id = self.langfuse.create_trace(
+                name=f"[Summary] {model}",
+                benchmark_type="function-call-summary",
+                metadata={
+                    "model": model,
+                    "session_id": session_id,
+                    "num_scenarios": len(scores),
+                    "avg_response_time_ms": int(avg_time),
+                    "avg_score": avg_score
+                }
+            )
+
+            if summary_trace_id:
+                # 모델 요약 generation 생성 (trace name 설정용)
+                from langfuse.types import TraceContext
+
+                summary_gen = self.langfuse.langfuse.start_generation(
+                    trace_context=TraceContext(trace_id=summary_trace_id),
+                    name=f"[Summary] {model}",
+                    model=model,
+                    input=f"Function calling benchmark summary for {model}",
+                    metadata={
+                        "num_scenarios": len(scores),
+                        "avg_score": avg_score,
+                        "avg_response_time_ms": int(avg_time)
+                    }
+                )
+
+                summary_gen.update(
+                    output=f"Model {model} completed {len(scores)} scenarios with average score {avg_score:.2f}"
+                )
+                summary_gen.end()
+
+                # 평균 점수 기록
+                self.langfuse.langfuse.create_score(
+                    trace_id=summary_trace_id,
+                    name="avg_accuracy",
+                    value=avg_score,
+                    comment=f"Average score across {len(scores)} scenarios"
+                )
+
+                # 평균 응답 시간 기록
+                if avg_time > 0:
+                    self.langfuse.langfuse.create_score(
+                        trace_id=summary_trace_id,
+                        name="avg_response_time",
+                        value=avg_time,
+                        comment=f"Average response time in milliseconds"
+                    )
 
     def _run_single_function_call(
         self,
