@@ -3,12 +3,13 @@
 로컬 시나리오 파일들을 Langfuse Dataset으로 업로드하여
 UI에서 실험을 실행할 수 있도록 합니다.
 """
-import os
+import yaml
 from pathlib import Path
-from typing import Dict, Any
+from typing import Dict, Any, List
 from datetime import datetime
 
-from src.function_call_loader import FunctionCallLoader
+from langfuse import Langfuse
+
 from src.logger import get_logger
 
 
@@ -22,20 +23,29 @@ class DatasetSync:
         """
         self.dataset_name = dataset_name
         self.logger = get_logger(__name__)
-        self.langfuse = None
+        self.langfuse = Langfuse()
+        self.logger.info("Langfuse 연결 성공")
 
-        # Langfuse 초기화
-        self._init_langfuse()
+    def _load_scenarios_from_yaml(self) -> Dict[str, Dict[str, Any]]:
+        """YAML 파일에서 시나리오 로드"""
+        scenarios = {}
+        scenarios_dir = Path(__file__).parent.parent / "function_calls" / "scenarios"
 
-    def _init_langfuse(self):
-        """Langfuse 클라이언트 초기화"""
-        try:
-            from langfuse import Langfuse
-            self.langfuse = Langfuse()
-            self.logger.info("Langfuse 연결 성공")
-        except Exception as e:
-            self.logger.error(f"Langfuse 초기화 실패: {e}")
-            raise
+        if not scenarios_dir.exists():
+            self.logger.warning(f"시나리오 디렉토리가 없습니다: {scenarios_dir}")
+            return scenarios
+
+        for yaml_file in scenarios_dir.glob("*.yaml"):
+            try:
+                with open(yaml_file, 'r', encoding='utf-8') as f:
+                    scenario_data = yaml.safe_load(f)
+
+                scenario_name = yaml_file.stem
+                scenarios[scenario_name] = scenario_data
+            except Exception as e:
+                self.logger.error(f"시나리오 로드 실패 ({yaml_file.name}): {e}")
+
+        return scenarios
 
     def sync_scenarios(self) -> Dict[str, Any]:
         """
@@ -44,8 +54,7 @@ class DatasetSync:
         Returns:
             동기화 결과 정보
         """
-        loader = FunctionCallLoader()
-        scenarios = loader.load_all_scenarios()
+        scenarios = self._load_scenarios_from_yaml()
 
         self.logger.info(f"로드된 시나리오: {len(scenarios)}개")
 

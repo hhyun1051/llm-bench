@@ -1,14 +1,14 @@
 """Langfuse Dataset Run 실행 모듈
 
-Langfuse Dataset을 기반으로 함수 호출 벤치마크를 실행하고
-자동 평가를 수행하는 모듈입니다.
+Langfuse Dataset을 기반으로 벤치마크를 실행하고 자동 평가를 수행하는 모듈입니다.
+함수 호출 벤치마크와 일반 질의 벤치마크를 모두 지원합니다.
 
 사용법:
-    # 기본 사용
+    # 함수 호출 벤치마크 (기본)
     python -m src.langfuse_runner gpt-4o-mini
 
-    # 커스텀 Dataset 사용
-    python -m src.langfuse_runner gpt-5-mini my_custom_dataset
+    # 일반 질의 벤치마크
+    python -m src.langfuse_runner gpt-4o-mini query_benchmark
 
     # 시스템 프롬프트 지정
     python -m src.langfuse_runner gpt-4o-mini --system-prompt function-calling-system-v1
@@ -16,6 +16,7 @@ Langfuse Dataset을 기반으로 함수 호출 벤치마크를 실행하고
     # 시스템 프롬프트 특정 버전 지정
     python -m src.langfuse_runner gpt-4o-mini --system-prompt function-calling-system-v1 --system-prompt-version 2
 """
+import time
 import yaml
 from typing import Dict, Any, List
 from pathlib import Path
@@ -25,6 +26,21 @@ from langfuse import Langfuse, Evaluation
 from src.function_call_runner import FunctionCallRunner
 from src.model_utils import create_model
 from src.logger import get_logger
+from src.constants import DEFAULT_SYSTEM_PROMPT
+
+
+# Config 캐시 (매번 로드하지 않도록)
+_config_cache = None
+
+
+def _load_config() -> Dict[str, Any]:
+    """모델 설정 로드 (캐싱)"""
+    global _config_cache
+    if _config_cache is None:
+        config_path = Path(__file__).parent.parent / "config" / "models.yaml"
+        with open(config_path, 'r', encoding='utf-8') as f:
+            _config_cache = yaml.safe_load(f)
+    return _config_cache
 
 
 # Tool 함수 매핑 (동적 import)
@@ -47,6 +63,96 @@ def get_tool_functions():
         "get_current_time": get_current_time,
         "convert_currency": convert_currency
     }
+
+
+def run_general_query_task(
+    item,
+    model_name: str = "gpt-4o-mini",
+    system_prompt: str = None
+) -> Dict[str, Any]:
+    """
+    Langfuse Dataset Item에 대해 일반 질의 실행
+
+    LLM에 프롬프트를 전달하고 응답을 받습니다.
+
+    Args:
+        item: Langfuse Dataset Item
+            - item.input: {"query": str, "type": "general_query"}
+        model_name: 사용할 모델 이름
+        system_prompt: 시스템 프롬프트 (None이면 기본값 사용)
+
+    Returns:
+        실행 결과 딕셔너리 (response, metadata 포함)
+    """
+    logger = get_logger(__name__)
+
+    # Config 로드 (캐싱됨)
+    config = _load_config()
+
+    # Input 파싱
+    query = item.input.get("query", "")
+    prompt_name = item.metadata.get("prompt_name", "unknown") if hasattr(item, 'metadata') else "unknown"
+
+    logger.info(f"실행 중: {prompt_name}")
+    logger.info(f"쿼리: {query}")
+
+    # 시스템 프롬프트 결정
+    if system_prompt is None:
+        system_prompt = DEFAULT_SYSTEM_PROMPT
+
+    # 모델 초기화
+    try:
+        model = create_model(config['models'][model_name])
+    except Exception as e:
+        logger.error(f"모델 초기화 오류: {e}")
+        return {
+            "error": f"모델 초기화 오류: {str(e)}",
+            "metadata": {"response_time_ms": 0}
+        }
+
+    start_time = time.time()
+
+    try:
+        # 메시지 구성
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": query}
+        ]
+
+        # LLM 호출
+        response = model.invoke(messages)
+
+        end_time = time.time()
+        response_time_ms = int((end_time - start_time) * 1000)
+
+        # 응답 텍스트 추출
+        if hasattr(response, 'content'):
+            response_text = response.content
+        else:
+            response_text = str(response)
+
+        logger.info(f"응답 완료 ({response_time_ms}ms)")
+
+        # 결과 구성
+        return {
+            "response": response_text,
+            "metadata": {
+                "response_time_ms": response_time_ms,
+                "prompt_name": prompt_name
+            }
+        }
+
+    except Exception as e:
+        end_time = time.time()
+        response_time_ms = int((end_time - start_time) * 1000)
+        logger.error(f"일반 질의 실행 오류: {e}")
+
+        return {
+            "error": str(e),
+            "metadata": {
+                "response_time_ms": response_time_ms
+            }
+        }
 
 
 def run_function_calling_task(
@@ -72,10 +178,8 @@ def run_function_calling_task(
     """
     logger = get_logger(__name__)
 
-    # Config 로드
-    config_path = Path(__file__).parent.parent / "config" / "models.yaml"
-    with open(config_path, 'r', encoding='utf-8') as f:
-        config = yaml.safe_load(f)
+    # Config 로드 (캐싱됨)
+    config = _load_config()
 
     # Input 파싱 (query 또는 prompt 필드 지원)
     prompt = item.input.get("query") or item.input.get("prompt", "")
@@ -281,6 +385,43 @@ class LangfuseExperimentRunner:
         self.logger = get_logger(__name__)
         self.langfuse = Langfuse()
 
+    def _detect_dataset_type(self, dataset) -> str:
+        """
+        Dataset 타입을 감지합니다.
+
+        첫 번째 아이템의 input.type 필드를 확인하여
+        'general_query' 또는 'function_calling'을 반환합니다.
+
+        Args:
+            dataset: Langfuse Dataset 객체
+
+        Returns:
+            "query" 또는 "function_calling"
+        """
+        try:
+            # Dataset의 첫 번째 아이템 가져오기
+            items = list(dataset.items)
+            if not items:
+                self.logger.warning("Dataset이 비어있습니다. 기본값 'function_calling' 사용")
+                return "function_calling"
+
+            first_item = items[0]
+            item_type = first_item.input.get("type", "")
+
+            if item_type == "general_query":
+                return "query"
+            else:
+                # tools 필드가 있으면 function_calling
+                if "tools" in first_item.input:
+                    return "function_calling"
+                else:
+                    # 기본값
+                    return "function_calling"
+
+        except Exception as e:
+            self.logger.warning(f"Dataset 타입 감지 실패: {e}. 기본값 'function_calling' 사용")
+            return "function_calling"
+
     def run_experiment(
         self,
         model_name: str = "gpt-4o-mini",
@@ -313,6 +454,10 @@ class LangfuseExperimentRunner:
             self.logger.error(f"Dataset을 찾을 수 없음: {e}")
             raise
 
+        # Dataset 타입 감지 (첫 번째 아이템의 input.type 확인)
+        dataset_type = self._detect_dataset_type(dataset)
+        self.logger.info(f"Dataset 타입: {dataset_type}")
+
         # 시스템 프롬프트 로드 (지정된 경우)
         system_prompt = None
         if system_prompt_name:
@@ -333,33 +478,51 @@ class LangfuseExperimentRunner:
             run_name = f"{model_name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
 
         if not run_description:
-            run_description = f"Function calling benchmark with {model_name}"
+            benchmark_type_str = "일반 질의" if dataset_type == "query" else "함수 호출"
+            run_description = f"{benchmark_type_str} 벤치마크 with {model_name}"
 
         self.logger.info(f"실험 시작: {run_name}")
         self.logger.info(f"Dataset: {self.dataset_name}")
         self.logger.info(f"모델: {model_name}")
 
-        # Evaluators 설정
-        evaluators = []
-        if use_evaluators:
-            evaluators = [
-                accuracy_evaluator,
-                correct_tool_evaluator,
-                correct_args_evaluator
-            ]
+        # Dataset 타입에 따라 Evaluators 및 Task 함수 설정
+        if dataset_type == "query":
+            # 일반 질의는 evaluator 없음 (정답이 없으므로)
+            evaluators = []
 
-        # Task 함수 (클로저로 model_name과 system_prompt 전달)
-        def task(item):
-            return run_function_calling_task(
-                item,
-                model_name=model_name,
-                system_prompt=system_prompt
-            )
+            # Task 함수
+            def task(item):
+                return run_general_query_task(
+                    item,
+                    model_name=model_name,
+                    system_prompt=system_prompt
+                )
+
+            benchmark_type = "general_query"
+        else:
+            # 함수 호출 벤치마크
+            evaluators = []
+            if use_evaluators:
+                evaluators = [
+                    accuracy_evaluator,
+                    correct_tool_evaluator,
+                    correct_args_evaluator
+                ]
+
+            # Task 함수
+            def task(item):
+                return run_function_calling_task(
+                    item,
+                    model_name=model_name,
+                    system_prompt=system_prompt
+                )
+
+            benchmark_type = "function_calling"
 
         # 실험 실행
         metadata = {
             "model": model_name,
-            "benchmark_type": "function_calling"
+            "benchmark_type": benchmark_type
         }
         if system_prompt_name:
             metadata["system_prompt_name"] = system_prompt_name
